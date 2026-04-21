@@ -1,4 +1,7 @@
-streamlit 
-numpy
+streamlit
 easyocr
-re
+pillow
+numpy
+deep-translator
+torch
+torchvision
