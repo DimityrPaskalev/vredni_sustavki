@@ -1,130 +1,569 @@
-
 import streamlit as st
 import easyocr
 import numpy as np
 from PIL import Image
 import cv2
 import re
+from rapidfuzz import fuzz
 
-# --------------------------------------------------
-# Настройки на страницата
-# --------------------------------------------------
+# ==========================================
+# PAGE CONFIG
+# ==========================================
+
 st.set_page_config(
-    page_title="OCR Проверка на съставки",
-    page_icon="🔍",
+    page_title="AI Ingredient Scanner",
+    page_icon="🧪",
     layout="centered"
 )
 
-st.title("🔍 Проверка на вредни съставки")
-st.write(
-    "Качи снимка или направи снимка с камерата, "
-    "за да разпознаеш текст и да провериш за вредни съставки."
-)
+# ==========================================
+# LOAD OCR
+# ==========================================
 
-# --------------------------------------------------
-# Списък с вредни съставки
-# --------------------------------------------------
-HARMFUL_INGREDIENTS = {
-    "e621": "Мононатриев глутамат (MSG)",
-    "monosodium glutamate": "Мононатриев глутамат (MSG)",
-    "palm oil": "Палмово масло",
-    "palmolein": "Палмово масло",
-    "hydrogenated oil": "Хидрогенирано масло",
-    "aspartame": "Аспартам",
-    "sodium nitrite": "Натриев нитрит",
-    "e250": "Натриев нитрит",
-    "e951": "Аспартам",
-    "high fructose corn syrup": "Глюкозо-фруктозен сироп",
-    "hfcs": "Глюкозо-фруктозен сироп",
-    "artificial flavor": "Изкуствени аромати",
-    "artificial colour": "Изкуствени оцветители",
-    "artificial color": "Изкуствени оцветители",
-    "e102": "Тартразин",
-    "e110": "Жълто оцветител",
-    "e124": "Понсо 4R"
-}
-
-# --------------------------------------------------
-# Зареждане на EasyOCR
-# --------------------------------------------------
 @st.cache_resource
-
 def load_reader():
     return easyocr.Reader(['bg', 'en'])
 
 reader = load_reader()
 
-# --------------------------------------------------
-# Функция за OCR
-# --------------------------------------------------
-def extract_text(image):
-    img_array = np.array(image)
+# ==========================================
+# DATABASE
+# ==========================================
 
-    # OCR
-    results = reader.readtext(img_array)
+INGREDIENT_DATABASE = {
 
-    extracted_text = "\n".join([res[1] for res in results])
+    "E950": {
+        "en": "Acesulfame K",
+        "bg": "Ацесулфам К",
+        "risk": 3,
+        "category": "Sweetener",
+        "info": "Artificial sweetener",
+        "aliases": [
+            "acesulfame k",
+            "ацесулфам",
+            "ацесулфам к"
+        ]
+    },
 
-    return extracted_text
+    "E951": {
+        "en": "Aspartame",
+        "bg": "Аспартам",
+        "risk": 3,
+        "category": "Sweetener",
+        "info": "Artificial sweetener",
+        "aliases": [
+            "aspartame",
+            "аспартам"
+        ]
+    },
 
-# --------------------------------------------------
-# Проверка за вредни съставки
-# --------------------------------------------------
-def find_harmful_ingredients(text):
+    "E955": {
+        "en": "Sucralose",
+        "bg": "Сукралоза",
+        "risk": 3,
+        "category": "Sweetener",
+        "info": "Artificial sweetener",
+        "aliases": [
+            "sucralose",
+            "сукралоза"
+        ]
+    },
+
+    "E621": {
+        "en": "Monosodium Glutamate",
+        "bg": "Мононатриев глутамат",
+        "risk": 2,
+        "category": "Flavor Enhancer",
+        "info": "Flavor enhancer",
+        "aliases": [
+            "msg",
+            "monosodium glutamate",
+            "мононатриев глутамат"
+        ]
+    },
+
+    "E210": {
+        "en": "Benzoic Acid",
+        "bg": "Бензоена киселина",
+        "risk": 2,
+        "category": "Preservative",
+        "info": "May cause allergic reactions",
+        "aliases": [
+            "benzoic acid",
+            "бензоена киселина"
+        ]
+    },
+
+    "E220": {
+        "en": "Sulfur Dioxide",
+        "bg": "Серен диоксид",
+        "risk": 3,
+        "category": "Preservative",
+        "info": "May trigger asthma reactions",
+        "aliases": [
+            "sulfur dioxide",
+            "серен диоксид"
+        ]
+    },
+
+    "E250": {
+        "en": "Sodium Nitrite",
+        "bg": "Натриев нитрит",
+        "risk": 3,
+        "category": "Preservative",
+        "info": "Linked to cancer risk",
+        "aliases": [
+            "sodium nitrite",
+            "натриев нитрит"
+        ]
+    },
+
+    "E320": {
+        "en": "BHA",
+        "bg": "BHA",
+        "risk": 3,
+        "category": "Antioxidant",
+        "info": "Possible carcinogen",
+        "aliases": [
+            "bha"
+        ]
+    },
+
+    "E321": {
+        "en": "BHT",
+        "bg": "BHT",
+        "risk": 3,
+        "category": "Antioxidant",
+        "info": "Linked to hormonal issues",
+        "aliases": [
+            "bht"
+        ]
+    }
+}
+
+# ==========================================
+# HARMFUL INGREDIENTS
+# ==========================================
+
+HARMFUL_INGREDIENTS = {
+
+    "sugar": {
+        "risk": 3,
+        "info": "High sugar intake may lead to obesity and diabetes"
+    },
+
+    "захар": {
+        "risk": 3,
+        "info": "Високият прием може да доведе до диабет"
+    },
+
+    "palm oil": {
+        "risk": 2,
+        "info": "May increase LDL cholesterol"
+    },
+
+    "палмово масло": {
+        "risk": 2,
+        "info": "Повишава LDL холестерола"
+    },
+
+    "glucose-fructose syrup": {
+        "risk": 3,
+        "info": "May disrupt metabolism"
+    },
+
+    "глюкозо-фруктозен сироп": {
+        "risk": 3,
+        "info": "Нарушава метаболизма"
+    }
+}
+
+# ==========================================
+# ALLERGENS
+# ==========================================
+
+ALLERGENS = [
+    "milk",
+    "мляко",
+    "gluten",
+    "глутен",
+    "soy",
+    "соя",
+    "eggs",
+    "яйца",
+    "peanuts",
+    "фъстъци",
+    "nuts",
+    "ядки",
+    "fish",
+    "риба"
+]
+
+# ==========================================
+# IMAGE PREPROCESSING
+# ==========================================
+
+def preprocess_image(image):
+
+    img = np.array(image)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    gray = cv2.resize(
+        gray,
+        None,
+        fx=2,
+        fy=2,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    thresh = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        11,
+        2
+    )
+
+    return thresh
+
+# ==========================================
+# NORMALIZE TEXT
+# ==========================================
+
+def normalize_text(text):
+
+    text = text.lower()
+
+    replacements = {
+        "0": "o",
+        "1": "i",
+        "|": "i"
+    }
+
+    for wrong, correct in replacements.items():
+        text = text.replace(wrong, correct)
+
+    return text
+
+# ==========================================
+# NORMALIZE E-NUMBERS
+# ==========================================
+
+def normalize_e_number(e):
+
+    e = e.upper()
+
+    e = e.replace(" ", "")
+    e = e.replace("-", "")
+    e = e.replace(".", "")
+
+    e = e.replace("O", "0")
+    e = e.replace("I", "1")
+    e = e.replace("Z", "2")
+
+    return e
+
+# ==========================================
+# DETECT E-NUMBERS
+# ==========================================
+
+def detect_e_numbers(text):
+
     found = []
 
-    normalized_text = text.lower()
+    e_matches = re.findall(
+        r'[Ee][\s\-\.]?\d{3}',
+        text
+    )
 
-    for keyword, description in HARMFUL_INGREDIENTS.items():
-        if re.search(rf"\b{re.escape(keyword)}\b", normalized_text):
-            found.append(description)
+    for e in e_matches:
+
+        e_clean = normalize_e_number(e)
+
+        if e_clean in INGREDIENT_DATABASE:
+            found.append(e_clean)
+
+    return found
+
+# ==========================================
+# DETECT INGREDIENTS
+# ==========================================
+
+def detect_ingredients(text):
+
+    text = normalize_text(text)
+
+    found = []
+
+    found.extend(detect_e_numbers(text))
+
+    for code, data in INGREDIENT_DATABASE.items():
+
+        for alias in data["aliases"]:
+
+            score = fuzz.partial_ratio(
+                alias.lower(),
+                text
+            )
+
+            if score > 85:
+                found.append(code)
+                break
 
     return list(set(found))
 
-# --------------------------------------------------
-# Качване на снимка
-# --------------------------------------------------
+# ==========================================
+# DETECT HARMFUL INGREDIENTS
+# ==========================================
+
+def detect_harmful(text):
+
+    text = normalize_text(text)
+
+    found = []
+
+    for ingredient in HARMFUL_INGREDIENTS:
+
+        score = fuzz.partial_ratio(
+            ingredient,
+            text
+        )
+
+        if score > 85:
+            found.append(ingredient)
+
+    return list(set(found))
+
+# ==========================================
+# DETECT ALLERGENS
+# ==========================================
+
+def detect_allergens(text):
+
+    text = normalize_text(text)
+
+    found = []
+
+    for allergen in ALLERGENS:
+
+        score = fuzz.partial_ratio(
+            allergen,
+            text
+        )
+
+        if score > 85:
+            found.append(allergen)
+
+    return list(set(found))
+
+# ==========================================
+# CALCULATE SCORE
+# ==========================================
+
+def calculate_score(found_items, harmful_items):
+
+    total = 0
+
+    for item in found_items:
+        total += INGREDIENT_DATABASE[item]["risk"]
+
+    for item in harmful_items:
+        total += HARMFUL_INGREDIENTS[item]["risk"]
+
+    return total
+
+# ==========================================
+# HEALTH LABEL
+# ==========================================
+
+def get_health_label(score):
+
+    if score == 0:
+        return "🟢 Healthy"
+
+    elif score <= 4:
+        return "🟡 Moderate"
+
+    return "🔴 Unhealthy"
+
+# ==========================================
+# RISK COLOR
+# ==========================================
+
+def risk_color(risk):
+
+    if risk == 1:
+        return "🟢"
+
+    elif risk == 2:
+        return "🟡"
+
+    return "🔴"
+
+# ==========================================
+# UI
+# ==========================================
+
+st.title("🧪 AI Ingredient Scanner")
+
+st.markdown("""
+Upload a food label image to detect:
+- Harmful ingredients
+- E-numbers
+- Allergens
+- Artificial sweeteners
+""")
+
 uploaded_file = st.file_uploader(
-    "📁 Качи снимка",
+    "📤 Upload image",
     type=["jpg", "jpeg", "png"]
 )
 
-# --------------------------------------------------
-# Снимка от камера
-# --------------------------------------------------
-camera_image = st.camera_input("📷 Направи снимка")
-
-image = None
+# ==========================================
+# PROCESS IMAGE
+# ==========================================
 
 if uploaded_file:
+
     image = Image.open(uploaded_file)
 
-elif camera_image:
-    image = Image.open(camera_image)
+    st.image(
+        image,
+        caption="Uploaded Image",
+        use_container_width=True
+    )
 
-# --------------------------------------------------
-# Обработка
-# --------------------------------------------------
-if image:
-    st.image(image, caption="Избрано изображение", use_container_width=True)
+    st.write("🔍 Processing image...")
 
-    with st.spinner("Разпознаване на текст..."):
-        text = extract_text(image)
+    processed = preprocess_image(image)
 
-    st.subheader("📄 Разпознат текст")
+    # ======================================
+    # OCR (FIXED VERSION)
+    # ======================================
 
-    if text.strip():
-        st.text_area("OCR резултат", text, height=250)
+    results = reader.readtext(
+        processed,
+        detail=0,
+        paragraph=True
+    )
 
-        harmful = find_harmful_ingredients(text)
+    extracted_text = " ".join(results)
 
-        st.subheader("⚠️ Открити вредни съставки")
+    # ======================================
+    # SHOW EXTRACTED TEXT
+    # ======================================
 
-        if harmful:
-            for item in harmful:
-                st.error(item)
-        else:
-            st.success("Не са открити вредни съставки.")
+    st.subheader("📄 Extracted Text")
 
-    else:
-        st.warning("Не беше разпознат текст.")
+    st.text_area(
+        "OCR Result",
+        extracted_text,
+        height=200
+    )
+
+    # ======================================
+    # DETECTION
+    # ======================================
+
+    found_ingredients = detect_ingredients(extracted_text)
+
+    harmful_found = detect_harmful(extracted_text)
+
+    allergens_found = detect_allergens(extracted_text)
+
+    # ======================================
+    # SCORE
+    # ======================================
+
+    score = calculate_score(
+        found_ingredients,
+        harmful_found
+    )
+
+    label = get_health_label(score)
+
+    # ======================================
+    # RESULTS
+    # ======================================
+
+    st.subheader("🧪 Analysis")
+
+    st.markdown(f"## {label}")
+    st.markdown(f"### Health Score: {score}")
+
+    # ======================================
+    # ADDITIVES
+    # ======================================
+
+    if found_ingredients:
+
+        st.subheader("⚠️ Detected Additives")
+
+        for item in found_ingredients:
+
+            data = INGREDIENT_DATABASE[item]
+
+            color = risk_color(data["risk"])
+
+            st.markdown(f"""
+{color} **{item} — {data['en']}**
+- 🇧🇬 {data['bg']}
+- Category: {data['category']}
+- Risk Level: {data['risk']}/3
+- ℹ️ {data['info']}
+""")
+
+    # ======================================
+    # HARMFUL INGREDIENTS
+    # ======================================
+
+    if harmful_found:
+
+        st.subheader("🚨 Harmful Ingredients")
+
+        for item in harmful_found:
+
+            data = HARMFUL_INGREDIENTS[item]
+
+            color = risk_color(data["risk"])
+
+            st.markdown(f"""
+{color} **{item.title()}**
+- Risk Level: {data['risk']}/3
+- ℹ️ {data['info']}
+""")
+
+    # ======================================
+    # ALLERGENS
+    # ======================================
+
+    if allergens_found:
+
+        st.subheader("🥜 Allergens")
+
+        for allergen in allergens_found:
+
+            st.warning(f"⚠️ {allergen}")
+
+    # ======================================
+    # SAFE RESULT
+    # ======================================
+
+    if (
+        not found_ingredients and
+        not harmful_found and
+        not allergens_found
+    ):
+
+        st.success("✅ No dangerous ingredients detected.")
+
+# ==========================================
+# FOOTER
+# ==========================================
+
+st.markdown("---")
+st.caption("AI Ingredient Scanner • BG + EN OCR")
