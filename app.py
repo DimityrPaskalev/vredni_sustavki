@@ -1,64 +1,192 @@
+# Streamlit приложение за OCR и разпознаване на вредни съставки
+
+## app.py
+
+```python
 import streamlit as st
 import easyocr
-from PIL import Image
-import re
 import numpy as np
+from PIL import Image
+import cv2
+import re
 
-st.title("OCR за разпознаване на Е-та и вредни съставки")
+# --------------------------------------------------
+# Настройки на страницата
+# --------------------------------------------------
+st.set_page_config(
+    page_title="OCR Проверка на съставки",
+    page_icon="🔍",
+    layout="centered"
+)
 
-# Вредни съставки (английски + български)
-bad_ingredients = [
-    "palm oil", "палмово масло",
-    "E621", "E102", "E133", "E250", "E211", "E951",
-    "E407", "E110", "E129",
-    "E471", "E472",
-    "HFCS", "глюкозо-фруктозен сироп",
-    "white flour", "бяло брашно",
-    "modified starch", "модифицирано нишесте",
-    "artificial flavors", "изкуствени аромати",
-    "E450", "E338", "E320",
-    "MSM",
-    "processed cheese", "топено сирене", "консерванти"
-]
+st.title("🔍 Проверка на вредни съставки")
+st.write(
+    "Качи снимка или направи снимка с камерата, "
+    "за да разпознаеш текст и да провериш за вредни съставки."
+)
 
-uploaded_file = st.file_uploader("Качи снимка", type=["png", "jpg", "jpeg"])
+# --------------------------------------------------
+# Списък с вредни съставки
+# --------------------------------------------------
+HARMFUL_INGREDIENTS = {
+    "e621": "Мононатриев глутамат (MSG)",
+    "monosodium glutamate": "Мононатриев глутамат (MSG)",
+    "palm oil": "Палмово масло",
+    "palmolein": "Палмово масло",
+    "hydrogenated oil": "Хидрогенирано масло",
+    "aspartame": "Аспартам",
+    "sodium nitrite": "Натриев нитрит",
+    "e250": "Натриев нитрит",
+    "e951": "Аспартам",
+    "high fructose corn syrup": "Глюкозо-фруктозен сироп",
+    "hfcs": "Глюкозо-фруктозен сироп",
+    "artificial flavor": "Изкуствени аромати",
+    "artificial colour": "Изкуствени оцветители",
+    "artificial color": "Изкуствени оцветители",
+    "e102": "Тартразин",
+    "e110": "Жълто оцветител",
+    "e124": "Понсо 4R"
+}
 
-if uploaded_file is not None:
+# --------------------------------------------------
+# Зареждане на EasyOCR
+# --------------------------------------------------
+@st.cache_resource
+
+def load_reader():
+    return easyocr.Reader(['bg', 'en'])
+
+reader = load_reader()
+
+# --------------------------------------------------
+# Функция за OCR
+# --------------------------------------------------
+def extract_text(image):
+    img_array = np.array(image)
+
+    # OCR
+    results = reader.readtext(img_array)
+
+    extracted_text = "\n".join([res[1] for res in results])
+
+    return extracted_text
+
+# --------------------------------------------------
+# Проверка за вредни съставки
+# --------------------------------------------------
+def find_harmful_ingredients(text):
+    found = []
+
+    normalized_text = text.lower()
+
+    for keyword, description in HARMFUL_INGREDIENTS.items():
+        if re.search(rf"\b{re.escape(keyword)}\b", normalized_text):
+            found.append(description)
+
+    return list(set(found))
+
+# --------------------------------------------------
+# Качване на снимка
+# --------------------------------------------------
+uploaded_file = st.file_uploader(
+    "📁 Качи снимка",
+    type=["jpg", "jpeg", "png"]
+)
+
+# --------------------------------------------------
+# Снимка от камера
+# --------------------------------------------------
+camera_image = st.camera_input("📷 Направи снимка")
+
+image = None
+
+if uploaded_file:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Качено изображение", use_column_width=True)
 
-    image_np = np.array(image)
+elif camera_image:
+    image = Image.open(camera_image)
 
-    st.write("Разпознаване на текст...")
+# --------------------------------------------------
+# Обработка
+# --------------------------------------------------
+if image:
+    st.image(image, caption="Избрано изображение", use_container_width=True)
 
-    reader = easyocr.Reader(['bg', 'en'])
-    results = reader.readtext(image_np)
+    with st.spinner("Разпознаване на текст..."):
+        text = extract_text(image)
 
-    extracted_text = " ".join([res[1] for res in results])
-    extracted_text_lower = extracted_text.lower()
+    st.subheader("📄 Разпознат текст")
 
-    st.subheader("📄 Разпознат текст:")
-    st.write(extracted_text)
+    if text.strip():
+        st.text_area("OCR резултат", text, height=250)
 
-    # Търсене на Е-та
-    e_numbers = re.findall(r'\bE\d{3,4}\b', extracted_text.upper())
+        harmful = find_harmful_ingredients(text)
 
-    # Търсене на вредни съставки
-    found_bad = []
-    for ingredient in bad_ingredients:
-        if ingredient.lower() in extracted_text_lower:
-            found_bad.append(ingredient)
+        st.subheader("⚠️ Открити вредни съставки")
 
-    st.subheader("🧪 Открити Е-та:")
-    if e_numbers:
-        for e in set(e_numbers):
-            st.write(f"- {e}")
+        if harmful:
+            for item in harmful:
+                st.error(item)
+        else:
+            st.success("Не са открити вредни съставки.")
+
     else:
-        st.write("Не са открити Е-та.")
+        st.warning("Не беше разпознат текст.")
+```
 
-    st.subheader("⚠️ Вредни съставки:")
-    if found_bad:
-        for item in set(found_bad):
-            st.error(f"Открито: {item}")
-    else:
-        st.success("Няма открити вредни съставки.")
+---
+
+# requirements.txt
+
+```txt
+streamlit
+easyocr
+opencv-python-headless
+numpy
+pillow
+torch
+torchvision
+```
+
+---
+
+# Стартиране
+
+## 1. Инсталация
+
+```bash
+pip install -r requirements.txt
+```
+
+## 2. Стартиране на приложението
+
+```bash
+streamlit run app.py
+```
+
+---
+
+# Какво прави приложението
+
+✅ Качване на снимка
+
+✅ Заснемане от камера
+
+✅ OCR разпознаване с EasyOCR
+
+✅ Поддръжка на български и английски език
+
+✅ Откриване на вредни съставки
+
+✅ Показване на резултатите в реално време
+
+---
+
+# Идеи за подобрение
+
+* Добавяне на база данни с повече съставки
+* Оценка на риска (ниска / средна / висока)
+* История на сканиранията
+* Експорт в PDF
+* Цветово маркиране върху самото изображение
+* AI анализ на хранителния етикет
