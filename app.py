@@ -1,8 +1,4 @@
-# Streamlit приложение за OCR и разпознаване на вредни съставки
 
-## app.py
-
-```python
 import streamlit as st
 import easyocr
 import numpy as np
@@ -132,37 +128,3 @@ if image:
 
     else:
         st.warning("Не беше разпознат текст.")
-```
-
----
-
-# requirements.txt
-
-```txt
-streamlit
-easyocr
-opencv-python-headless
-numpy
-pillow
-torch
-torchvision
-```
-
----
-
-# Стартиране
-
-## 1. Инсталация
-
-```bash
-pip install -r requirements.txt
-```
-
-## 2. Стартиране на приложението
-
-```bash
-streamlit run app.py
-```
-
----
-
